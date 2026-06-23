@@ -1,0 +1,5 @@
+{
+    "jiracopotilot.instanceUrl": "https://ruchika.joshi88.atlassian.net/browse/QT-1",
+    "jiracopotilot.email": "ruchika.joshi88@gmail.com",
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}
