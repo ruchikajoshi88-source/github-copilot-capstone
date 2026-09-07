@@ -1,229 +1,242 @@
 # Architecture Specification: Automated Documentation Sync
 
-## 1. Architecture Goals
-- Implement a phase-1 pipeline that syncs Markdown documents from repository files to a registry/mock storage target.
-- Support two trigger paths: CLI and webhook/event-driven.
-- Preserve YAML frontmatter metadata and Markdown body.
-- Ensure idempotency, graceful error handling, and rate-limit backoff.
+## 1. Purpose and Scope
+This architecture implements the phase-1 requirements in [requirements.md](requirements.md): synchronize Markdown files with YAML frontmatter from repository storage into a target registry/mock storage, via CLI and webhook triggers, with idempotency, rate-limit handling, and graceful failure isolation.
 
-## 2. Scope and Constraints
-- In scope: Markdown (.md) source files, YAML frontmatter parsing, deterministic upsert to target.
-- In scope: run summary, structured logging, retry with exponential backoff + jitter.
-- Out of scope: bi-directional sync, rich-format conversion, manual approval workflow.
+## 2. Architecture Drivers
+- Functional drivers:
+  - Parse Markdown and YAML frontmatter.
+  - Support full and scoped CLI sync.
+  - Support webhook/event-triggered incremental sync.
+  - Upsert by deterministic key with no-change skip.
+- Non-functional drivers:
+  - Idempotency across repeated runs and duplicate events.
+  - Retry with exponential backoff and jitter.
+  - Dead-letter capture for unrecoverable failures.
+  - Structured logs and run metrics.
 
-## 3. High-Level Architecture
+## 3. Technology Stack Choices
 
-```mermaid
-flowchart LR
-    A[Repository Markdown Source] --> B[Source Scanner]
-    C[CLI Trigger] --> D[Sync Orchestrator]
-    E[Webhook Receiver] --> F[Event Validator]
-    F --> D
-    B --> D
-    D --> G[Document Parser and Validator]
-    G --> H[Canonicalizer and Checksum]
-    H --> I[Idempotency and State Store]
-    I --> J[Target Connector]
-    J --> K[Registry or Mock Storage]
-    D --> L[Run Summary and Metrics]
-    J --> M[Retry and Backoff Policy]
-    M --> J
-    D --> N[Failure Store or DLQ]
-```
+### 3.1 Language and Runtime
+- Python 3.13 for fast iteration, strong filesystem support, and test tooling.
 
-## 4. Component Design
+### 3.2 Core Libraries
+- `PyYAML` for YAML frontmatter parsing.
+- `pytest` for unit, integration, and resilience tests.
+- Standard library modules:
+  - `pathlib` for path normalization.
+  - `hashlib` for deterministic checksum generation.
+  - `fnmatch` for include/exclude glob filtering.
+  - `json`, `logging`, `time`, and `uuid` for orchestration and observability.
+
+### 3.3 Trigger and Service Options
+- CLI trigger: Python module entrypoint under `apps/sync_service/main.py`.
+- Webhook trigger: lightweight HTTP service (recommended `FastAPI` + `uvicorn`) for event validation and dispatch.
+
+### 3.4 Storage Options
+- Phase 1 target: mock storage adapter (in-memory/file-backed).
+- Idempotency state store: local persistent store (file or SQLite) with document key and checksum.
+- Dead-letter queue store: append-only JSONL or SQLite table with failure payload and metadata.
+
+## 4. Component Architecture
 
 ### 4.1 Trigger Layer
 - CLI Trigger:
-  - Entry point for full sync and path-scoped sync.
-  - Produces a run context with run_id, trigger_type=cli, and optional scope filters.
+  - Starts full or path-scoped runs.
+  - Produces run context (`run_id`, scope, trigger type).
 - Webhook Receiver:
-  - Receives repository events.
-  - Validates payload schema and signature.
-  - Extracts changed file scope and creates run context with trigger_type=event.
+  - Verifies signature and schema.
+  - Extracts changed Markdown paths.
+  - Deduplicates repeated events by `event_id`.
 
-### 4.2 Source Scanner
-- Resolves include/exclude path patterns.
-- Selects only .md files.
-- Produces source document manifests:
-  - repository_id
-  - source_path
-  - file_size
-  - discovered_at
+### 4.2 Orchestrator
+- Coordinates end-to-end workflow for a run.
+- Enforces ordering: discover -> parse -> validate -> canonicalize -> idempotency check -> write.
+- Aggregates per-file and run-level outcomes.
 
-### 4.3 Parser and Validator
-- Splits frontmatter and Markdown body.
-- Parses YAML frontmatter.
-- Applies metadata schema validation.
-- Emits either:
-  - Valid canonical input object, or
-  - Structured validation error.
+### 4.3 Source Scanner and Loader
+- Discovers `.md` files from configured source root.
+- Applies include/exclude patterns.
+- Loads UTF-8 content; emits source access errors for missing/unreadable files.
 
-### 4.4 Canonicalizer and Checksum
-- Normalizes source_path separators and line endings.
-- Produces deterministic document key:
-  - key = hash(repository_id + normalized_source_path)
-- Produces checksum from normalized body + selected metadata.
+### 4.4 Frontmatter Parser and Validator
+- Splits YAML frontmatter from Markdown body.
+- Parses frontmatter into key/value mapping.
+- Validates required metadata fields and types.
 
-### 4.5 Idempotency and State Store
-- Stores last successful checksum by document key.
-- Decision rules:
-  - New key: create.
-  - Existing key + changed checksum: update.
-  - Existing key + unchanged checksum: skip (no-change).
-- Stores processed event identifiers to suppress duplicate event writes.
+### 4.5 Canonicalizer and Checksum Engine
+- Normalizes path separators and line endings.
+- Builds deterministic document key from repository id + normalized source path.
+- Computes checksum from normalized content and selected metadata.
 
-### 4.6 Target Connector
-- Provides abstract operations:
-  - get(key)
-  - upsert(key, document)
-  - delete_or_mark_inactive(key) (policy-driven)
-- In phase 1, implementation points to mock storage; interface remains production-ready.
+### 4.6 Idempotency and Event Ledger
+- Document ledger stores last successful checksum by key.
+- Event ledger stores processed webhook event identifiers.
+- Decision outcomes:
+  - `create`
+  - `update`
+  - `no_change`
+  - `failed`
 
-### 4.7 Reliability Subsystems
-- Retry/Backoff Engine:
-  - Handles transient failures and throttling.
-  - Uses exponential backoff with jitter.
-- Failure Store/DLQ:
-  - Captures unrecoverable failures with context:
-    - run_id
-    - source_path
-    - key
-    - error_class
-    - error_message
+### 4.7 Target Connector
+- Contract-based adapter:
+  - `get(key)`
+  - `upsert(key, canonical_doc)`
+  - `delete_or_mark_inactive(key)`
+- Default phase-1 implementation points to mock storage.
 
-### 4.8 Observability Layer
-- Structured logs per stage and document.
-- Run metrics:
-  - discovered_count
-  - processed_count
-  - succeeded_count
-  - skipped_count
-  - failed_count
-  - retry_count
-  - duration_ms
-- Final run summary emitted to CLI output and log sink.
+### 4.8 Reliability Subsystem
+- Retry Engine:
+  - Classifies transient and throttling errors.
+  - Applies exponential backoff with jitter.
+  - Stops at configured retry limit.
+- Dead-Letter Queue (DLQ):
+  - Persists unrecoverable document failures.
+  - Stores `run_id`, `event_id`, source path, document key, error class, retry attempts, timestamp.
 
-## 5. Runtime Flows
+### 4.9 Observability and Reporting
+- Structured logs with `run_id` and `document_key`.
+- Metrics: discovered, processed, succeeded, skipped, failed, retries, duration.
+- CLI summary and machine-readable run report.
 
-### 5.1 CLI Flow
-1. User executes sync command.
-2. Orchestrator builds run context.
-3. Scanner discovers markdown files.
-4. Each document is parsed, validated, canonicalized, and checksummed.
-5. Idempotency layer decides create/update/skip.
-6. Target connector writes with retry policy.
-7. Summary and exit code are returned.
+## 5. Sync Flow Sequence Diagram
 
-### 5.2 Webhook/Event Flow
-1. Webhook endpoint receives event.
-2. Signature and payload are validated.
-3. Relevant markdown paths are extracted.
-4. Orchestrator processes only affected files.
-5. Duplicate event IDs are de-duplicated.
-6. Writes occur through idempotency + retry path.
-7. Summary is emitted for observability.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User/Webhook
+    participant T as Trigger Layer
+    participant O as Sync Orchestrator
+    participant S as Source Scanner/Loader
+    participant P as Parser/Validator
+    participant C as Canonicalizer
+    participant I as Idempotency Store
+    participant R as Retry Engine
+    participant G as Target Connector
+    participant D as DLQ Store
 
-## 6. Data Contracts
+    U->>T: Start sync (CLI command or webhook event)
+    T->>O: Create run context (run_id, scope, trigger)
+    O->>S: Discover markdown files
+    S-->>O: Source file list
 
-### 6.1 Canonical Document Contract
-- key: string
-- repository_id: string
-- source_path: string
-- metadata: object
-- content_markdown: string
-- checksum: string
-- version: string
-- last_synced_at: timestamp
+    loop For each source file
+        O->>S: Load UTF-8 content
+        alt Read error or missing file
+            S-->>O: Source access error
+            O->>D: Persist failure record
+        else Read success
+            O->>P: Parse frontmatter + validate metadata
+            alt Malformed YAML or validation failure
+                P-->>O: Validation error
+                O->>D: Persist failure record
+            else Valid document
+                O->>C: Normalize and compute key/checksum
+                C-->>O: Canonical document
+                O->>I: Check prior checksum/event
+                alt No change or duplicate event
+                    I-->>O: Skip write
+                else Needs write
+                    O->>R: Execute write with retry policy
+                    loop Retry up to max attempts
+                        R->>G: Upsert document
+                        alt Success
+                            G-->>R: Ack
+                            R-->>O: Success
+                        else Rate-limited/transient failure
+                            G-->>R: 429/5xx
+                            R->>R: Backoff + jitter
+                        end
+                    end
+                    alt Retry exhausted
+                        R-->>O: Retry exhausted
+                        O->>D: Persist failure record
+                    end
+                end
+            end
+        end
+    end
 
-### 6.2 Minimum Metadata Contract (YAML Frontmatter)
-- title: string
-- source_path: string
-- version: string
-- last_updated: string (ISO-8601 date or datetime)
-- doc_id: optional if deterministic keying is enabled
+    O-->>T: Run summary (success, skip, fail, retries)
+    T-->>U: Exit code/HTTP response + run_id
+```
 
-## 7. Error Handling Strategy
-- Validation errors:
-  - Mark document failed; continue run.
-- Missing file errors:
-  - Mark file-not-found; continue run.
-- Target transient errors:
-  - Retry with backoff and jitter.
-- Retry exhaustion:
-  - Mark failed with retry-exhausted classification.
-- Fatal startup errors (for example misconfiguration):
-  - Abort run with non-zero exit code and actionable message.
+## 6. Retry and Dead-Letter Queue Logic
 
-## 8. Idempotency Model
-- Idempotency key scope: repository_id + normalized source_path.
-- Change detection: checksum comparison against last successful sync.
-- Duplicate event handling: event_id ledger with TTL/configurable retention.
-- Guarantee: repeated runs and duplicate events converge to one consistent target state.
+### 6.1 Retry Policy
+- Retry categories:
+  - HTTP 429 rate-limited responses.
+  - Transient target errors (for example 5xx, timeout, connection reset).
+- Non-retry categories:
+  - Malformed YAML and metadata validation errors.
+  - Permanent request errors caused by invalid payload shape.
+- Backoff formula:
+  - `delay = min(max_delay_ms, base_delay_ms * 2^(attempt-1)) + jitter`
+- Default policy:
+  - max attempts: 5
+  - base delay: 200 ms
+  - max delay: 5000 ms
 
-## 9. Security Architecture
-- Secrets loaded only from environment variables or secret manager.
-- Webhook payload signature verification before processing.
-- Log redaction for credentials and sensitive headers.
-- Input validation for all external payloads and CLI options.
+### 6.2 DLQ Record Contract
+- `run_id`
+- `trigger_type`
+- `event_id` (if webhook)
+- `source_path`
+- `document_key` (if computed)
+- `error_class`
+- `error_code`
+- `error_message`
+- `attempt_count`
+- `failed_at`
 
-## 10. Deployment and Packaging (Phase 1)
-- Runtime shape:
-  - CLI executable entry point.
-  - Webhook service endpoint process.
-- Config via environment and config file:
-  - source include/exclude patterns
-  - retry/backoff settings
-  - target connector mode (mock or registry)
-  - webhook signature key settings
+### 6.3 DLQ Processing
+- Persist one record per unrecoverable file-level failure.
+- Do not block remaining files in the same run.
+- Surface DLQ count in run summary.
+- Support replay workflow in later phase (out of scope for phase 1 implementation).
 
-## 11. Suggested Repository Layout
-- apps/sync-service/
-  - triggers/
-  - source/
-  - parser/
-  - canonical/
-  - idempotency/
-  - target/
-  - reliability/
-  - observability/
-- shared/
-  - contracts/
-  - config/
-  - logging/
-  - errors/
-- tests/
-  - unit/
-  - integration/
-  - resilience/
+## 7. Data Contracts
 
-## 12. Test Architecture
-- Unit tests:
-  - parser and YAML validation
-  - deterministic key and checksum
-  - retry policy math and jitter boundaries
-- Integration tests:
-  - source-to-target upsert and no-change skip behavior
-  - CLI run summary and exit codes
-  - webhook scoped sync
-- Resilience tests:
-  - throttling simulation (429)
-  - transient 5xx retries
-  - malformed frontmatter and missing file isolation
+### 7.1 Canonical Document
+- `key`: string
+- `repository_id`: string
+- `source_path`: string
+- `metadata`: object
+- `content_markdown`: string
+- `checksum`: string
+- `version`: string
 
-## 13. Requirements Traceability
-- FR-1 and AC-1: Source Scanner.
-- FR-2 and AC-2: Parser and Validator.
-- FR-3 and AC-5: Canonicalizer + Idempotency + Target Connector.
-- FR-4 and AC-3: CLI Trigger.
-- FR-5 and AC-4: Webhook Receiver + Event Validator.
-- FR-7 and AC-6: Error Handling Strategy.
-- FR-8 and AC-7: Retry/Backoff Engine.
-- NFR-1 to NFR-5: Reliability, Observability, Security, and modular component boundaries.
+### 7.2 Required Frontmatter Fields
+- `title`
+- `source_path`
+- `version`
+- `last_updated` (ISO-8601 date or datetime)
+- `doc_id` optional when deterministic keying is enabled
 
-## 14. Open Decisions
-- Exact checksum algorithm (for example SHA-256) and canonicalization rules.
-- Event ledger retention duration.
-- Maximum payload/file size limits.
-- Concurrency level defaults for document processing.
-- Delete vs mark-inactive policy for removed source files.
+## 8. Security and Compliance Controls
+- Secrets and tokens loaded from environment or secret manager only.
+- Webhook signature verification before orchestration.
+- Input and schema validation for all external trigger payloads.
+- Structured logging with secret redaction.
+
+## 9. Deployment View (Phase 1)
+- One CLI process for ad hoc runs.
+- One webhook service process for event-triggered runs.
+- Shared config via environment variables.
+- Mock target adapter as default, with pluggable interface for production registry.
+
+## 10. Traceability to Requirements
+- FR-1 and AC-1: Source scanner and glob filtering.
+- FR-2 and AC-2: Frontmatter parser and metadata validator.
+- FR-3 and AC-5: Canonical key/checksum and idempotent upsert.
+- FR-4 and AC-3: CLI trigger and exit status handling.
+- FR-5 and AC-4: Webhook validation and event dedup ledger.
+- FR-7 and AC-6: Graceful file-level failure isolation and reporting.
+- FR-8 and AC-7: Retry engine, backoff policy, and DLQ persistence.
+- NFR-1 to NFR-5: Reliability, performance guardrails, observability, security, and modular maintainability.
+
+## 11. Open Design Decisions
+- Final webhook framework choice (FastAPI recommended).
+- Choice of persistent stores for idempotency ledger and DLQ in non-mock environments.
+- Delete versus mark-inactive policy for source document removals.
+- Concurrency default for parallel file processing under rate-limit constraints.

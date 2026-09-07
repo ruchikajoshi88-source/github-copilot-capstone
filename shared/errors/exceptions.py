@@ -28,3 +28,13 @@ class ValidationError(SyncError):
 class SourceAccessError(SyncError):
     def __init__(self, message: str, context: dict[str, str] | None = None) -> None:
         super().__init__(ErrorCode.SOURCE_ACCESS_ERROR, message, context)
+
+
+class ConnectorTransientError(SyncError):
+    def __init__(self, message: str, context: dict[str, str] | None = None) -> None:
+        super().__init__(ErrorCode.CONNECTOR_TRANSIENT_ERROR, message, context)
+
+
+class RateLimitedError(SyncError):
+    def __init__(self, message: str, context: dict[str, str] | None = None) -> None:
+        super().__init__(ErrorCode.RATE_LIMITED, message, context)
