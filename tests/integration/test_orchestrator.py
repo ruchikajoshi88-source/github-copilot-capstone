@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 from apps.sync_service.idempotency.store import InMemoryEventLedger, InMemoryIdempotencyStore
 from apps.sync_service.orchestrator import SyncOrchestrator
 from apps.sync_service.reliability.dlq import JsonlDlqStore
 from apps.sync_service.reliability.retry import RetryConfig
 from apps.sync_service.target.mock_registry import MockRegistryTarget
+from shared.errors.exceptions import ValidationError
 
 
 def _write_doc(path: Path, title: str, version: str = "v1") -> None:
@@ -67,6 +70,25 @@ def test_orchestrator_path_scope(tmp_path: Path) -> None:
     assert summary.discovered_count == 1
     assert summary.succeeded_count == 1
     assert target.all_documents()[0].source_path == "b.md"
+
+
+def test_path_scoped_cli_request_cannot_bypass_exclude_patterns(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    _write_doc(docs / "private.md", "Private")
+    orchestrator, target = _build_orchestrator(tmp_path)
+
+    with pytest.raises(ValidationError, match="outside configured include/exclude scope"):
+        orchestrator.run(
+            "repo",
+            str(docs),
+            ("**/*.md",),
+            ("private.md",),
+            trigger_type="cli",
+            path_scope=("private.md",),
+        )
+
+    assert target.all_documents() == []
 
 
 def test_orchestrator_event_dedup(tmp_path: Path) -> None:

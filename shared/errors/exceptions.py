@@ -38,3 +38,12 @@ class ConnectorTransientError(SyncError):
 class RateLimitedError(SyncError):
     def __init__(self, message: str, context: dict[str, str] | None = None) -> None:
         super().__init__(ErrorCode.RATE_LIMITED, message, context)
+
+
+class PersistenceError(SyncError):
+    def __init__(self, message: str, context: dict[str, str] | None = None) -> None:
+        super().__init__(ErrorCode.PERSISTENCE_ERROR, message, context)
+
+
+class EventInProgressError(PersistenceError):
+    """Raised when another request holds the active lease for an event."""

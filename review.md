@@ -1,182 +1,47 @@
-# Implementation Plan: Automated Documentation Sync
+# Code and Security Review: Automated Documentation Sync and SCRUM-6
 
-This plan operationalizes requirements in [requirements.md](requirements.md) and architecture in [architecture.md](architecture.md) into phased delivery milestones.
+**Review date:** 2026-11-16
+**Review status:** Completed. One medium code-review finding was fixed and regression-tested; no actionable security vulnerabilities were reported. Independent review was not rerun after the focused fix.
 
-## 1. Delivery Principles
-- Build thin vertical slices early: trigger -> parse -> idempotency -> target write -> summary.
-- Keep interfaces stable and implementations swappable (mock target first).
-- Test-first for parsing, idempotency, and retry logic.
-- Treat observability and error taxonomy as first-class deliverables.
+## Review Scope and Method
 
-## 2. Milestones
+- Reviewed current implementation changes in `apps/sync_service/`, `apps/story_intake/`, `apps/tour_booking/`, `shared/`, dependencies, and associated tests against `requirements.md` and `architecture.md`.
+- A delegated security review examined trust/path boundaries, HMAC/event handling, persistence, diagnostics, story intake, static-page boundaries, dependencies, and test evidence.
+- A delegated code review examined correctness, reliability, and maintainability.
+- Pre-existing unrelated `.github/`, `.vscode/`, and other user worktree changes were not part of this review.
 
-### M1: Foundation and Contracts
-Goal: Establish project skeleton, contracts, config model, and error taxonomy.
+## Findings
 
-Deliverables:
-- Repository structure under apps/, shared/, tests/.
-- Canonical document contract and metadata validation schema.
-- Unified error model and error classes.
-- Config loading/validation for source paths, trigger mode, and retry policy.
+### Medium — Explicit scoped CLI paths could bypass include/exclude filters (resolved)
+- **Evidence:** The code review found that `SyncOrchestrator._scoped_files` added any requested path missing from the already-filtered discovery result as a synthetic source. An existing file excluded by configured patterns could therefore be processed when named explicitly.
+- **Impact:** A path-scoped CLI run could sync a document outside effective configured scope, contrary to AC-1.
+- **Resolution:** `_scoped_files` now applies the configured include/exclude patterns to every explicit request before selecting or synthesizing a missing path. Regression test: `tests/integration/test_orchestrator.py::test_path_scoped_cli_request_cannot_bypass_exclude_patterns`.
+- **Validation:** After the fix, `python -m pytest tests/integration/test_orchestrator.py tests/integration/test_webhook.py -v` passed (9 tests), followed by the full suite passing (42 tests).
+- **Review limitation:** The code-review agent identified the issue but did not independently re-review the remediation; validation evidence is test-based.
 
-Exit Criteria:
-- Contract tests pass.
-- Invalid config fails fast with actionable messages.
+## Security Review Result
 
-### M2: Source + Parser + Canonicalization
-Goal: Read markdown files, parse frontmatter, and produce canonical documents.
+- **Finding:** The delegated security reviewer reported no actionable vulnerabilities in the reviewed changes.
+- **Secret search:** The reviewer reported that no `gitleaks`, `trufflehog`, `detect-secrets`, or `git-secrets` executable was available. A scoped `rg` search for private-key headers, common cloud key IDs, and credential-like assignments returned no matching files. This is a limited text-pattern search, not a comprehensive or clean secret-scan claim.
+- **Residual risks and assumptions:**
+  - Secret redaction is heuristic and may not recognize every encoding or diagnostic format. Review exception messages before adding an external connector.
+  - SQLite data is not application-encrypted; the documented local OS account/filesystem permissions are the access boundary.
+  - No Jira/Confluence connector or credentials are configured. The local story intake accepts labeled `.docx` files; remote source retrieval remains unimplemented.
+  - The webhook was exercised with an in-process ASGI transport, not a remote provider or public deployment. TLS, reverse proxy, ingress authorization, and production hosting were not configured or tested.
+  - SQLite/DLQ/story-state backups are not configured. Local state loss requires a full sync or story re-intake.
+  - No dedicated dependency vulnerability scanner, SAST, or DAST tool was run.
 
-Deliverables:
-- Source scanner with include/exclude support.
-- YAML frontmatter parser and validator.
-- Canonicalizer with deterministic key and checksum generation.
+## Test Evidence Considered
 
-Exit Criteria:
-- Unit tests pass for parser success/failure cases.
-- Deterministic key/checksum stable across reruns.
+- Full run: `python -m pytest tests/unit tests/integration tests/resilience -v --cov=.` — 42 passed, 0 failed, 0 skipped; 87% aggregate repository coverage; no warnings.
+- Focused review-fix run: `python -m pytest tests/integration/test_orchestrator.py tests/integration/test_webhook.py -v` — 9 passed.
+- Additional checks and current limitations are recorded in `verify.md`.
+- Review agents did not independently rerun the tests; the recorded results came from the parent session.
 
-### M3: Target Connector + Idempotent Upsert
-Goal: Upsert canonical documents into mock storage with no-change skip logic.
+## Open Questions / Release Caveats
 
-Deliverables:
-- Target connector interface + mock storage implementation.
-- Idempotency state store for checksum comparison.
-- Create/update/no-change behavior and result statuses.
+1. Provide authorized read-only Jira/Confluence scopes before implementing those connectors.
+2. Approve remote webhook hosting/network controls if a real provider must call the endpoint.
+3. Decide state backup/recovery and production registry policies before moving beyond the local mock target.
 
-Exit Criteria:
-- Integration tests validate create/update/skip paths.
-- Repeated run with unchanged input produces zero writes.
-
-### M4: CLI Trigger + Run Summaries
-Goal: Support command-driven sync for full and path-scoped execution.
-
-Deliverables:
-- CLI command entrypoint.
-- Full sync and path-scoped sync options.
-- Run summary output and proper exit codes.
-
-Exit Criteria:
-- CLI exits 0 only for full success.
-- Non-zero on partial/fatal failures with clear summary.
-
-### M5: Webhook Trigger + Event Validation
-Goal: Add event-driven sync with duplicate event protection.
-
-Deliverables:
-- Webhook endpoint and payload schema validation.
-- Signature verification and invalid payload rejection.
-- Event scope extraction for changed markdown paths.
-- Event dedup ledger.
-
-Exit Criteria:
-- Duplicate event replay does not create duplicate writes.
-- Invalid event payloads are rejected and logged.
-
-### M6: Reliability Hardening (Retry, Backoff, DLQ)
-Goal: Make sync robust under throttling and transient failures.
-
-Deliverables:
-- Retry engine with exponential backoff and jitter.
-- Retry policy configuration and exhaustion handling.
-- Failure store/DLQ-style persistence for unrecoverable document failures.
-
-Exit Criteria:
-- Resilience tests pass for 429 and transient 5xx behavior.
-- Retry-exhausted outcomes are traceable and auditable.
-
-### M7: Observability + Security + Readiness
-Goal: Production-ready telemetry and security controls for phase 1.
-
-Deliverables:
-- Structured logs and run-level metrics.
-- Secret-safe logging and redaction.
-- End-to-end test report and traceability mapping.
-
-Exit Criteria:
-- Run metrics include processed/succeeded/skipped/failed/retries.
-- Security checks for secrets and webhook signature handling pass.
-
-## 3. Task Breakdown
-
-### Track A: Core Domain
-- A1: Define canonical document model and status enums.
-- A2: Define metadata schema and validator.
-- A3: Define deterministic key strategy.
-- A4: Define checksum strategy and normalization rules.
-
-### Track B: Source and Parsing
-- B1: Implement source scanner (include/exclude + .md filtering).
-- B2: Implement file loader with graceful missing-file handling.
-- B3: Implement frontmatter extraction/parsing.
-- B4: Implement validation error reporting.
-
-### Track C: Target and Idempotency
-- C1: Create target connector interface.
-- C2: Implement mock storage connector.
-- C3: Implement idempotency state store interface.
-- C4: Implement create/update/no-change decision engine.
-
-### Track D: Triggers
-- D1: Implement CLI command and options.
-- D2: Implement webhook endpoint.
-- D3: Implement payload/signature validation.
-- D4: Implement event dedup ledger.
-
-### Track E: Reliability and Ops
-- E1: Implement retry/backoff utility.
-- E2: Add error taxonomy mapping.
-- E3: Add failure persistence (DLQ-style).
-- E4: Add structured run summary + metrics emitter.
-
-### Track F: Testing
-- F1: Unit tests for parser/validator.
-- F2: Unit tests for key/checksum/idempotency.
-- F3: Integration tests for source-to-target sync.
-- F4: Integration tests for CLI paths and exit codes.
-- F5: Integration tests for webhook scope + dedup behavior.
-- F6: Resilience tests for retries/throttling/exhaustion.
-
-## 4. Dependency Order
-1. A1-A4
-2. B1-B4 and C1
-3. C2-C4
-4. D1
-5. D2-D4
-6. E1-E4
-7. F1-F6 (iterative, starts in parallel after A/B/C foundations)
-
-## 5. Definition of Done
-A milestone is done when:
-- Required code is implemented and merged.
-- Tests for that milestone pass in CI.
-- Logging and error outputs are documented.
-- Traceability to requirements is updated.
-
-## 6. Risks and Mitigations
-- Risk: Frontmatter variability causes parse instability.
-  - Mitigation: Strict schema + explicit fallback behavior + focused test corpus.
-- Risk: Duplicate/out-of-order events create inconsistent state.
-  - Mitigation: Event dedup ledger + idempotent write model.
-- Risk: Target throttling degrades throughput.
-  - Mitigation: Tunable retry policy, bounded concurrency, and backpressure.
-- Risk: Ambiguous delete behavior for removed files.
-  - Mitigation: Configurable policy (delete or mark-inactive) with explicit default.
-
-## 7. Suggested Sprint Slicing
-- Sprint 1: M1 + M2
-- Sprint 2: M3 + M4
-- Sprint 3: M5 + M6
-- Sprint 4: M7 + final hardening and release readiness
-
-## 8. Validation Gates
-- Gate 1: Parser/idempotency unit suite green.
-- Gate 2: CLI integration suite green.
-- Gate 3: Webhook + dedup integration suite green.
-- Gate 4: Resilience suite green.
-- Gate 5: Requirements traceability and exit criteria confirmed.
-
-## 9. Immediate Next Actions
-1. Create scaffold folders and placeholder modules under apps/ and shared/.
-2. Author canonical contract and metadata schema first.
-3. Implement source scanner and parser with tests before triggers.
-4. Add mock target connector and idempotent upsert path.
+No commit, branch, remote pull request, production integration, or external deployment was created.

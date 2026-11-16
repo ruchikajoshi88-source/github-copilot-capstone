@@ -26,7 +26,7 @@ def parse_markdown_with_frontmatter(path: Path) -> ParsedMarkdown:
     """Parse a markdown file, extracting YAML frontmatter if present."""
     try:
         content = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise SourceAccessError("Unable to read source file", {"source_path": str(path), "cause": str(exc)}) from exc
 
     match = FRONTMATTER_RE.match(content)
