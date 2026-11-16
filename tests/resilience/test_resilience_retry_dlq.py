@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from apps.sync_service.idempotency.store import InMemoryEventLedger, InMemoryIdempotencyStore
 from apps.sync_service.orchestrator import SyncOrchestrator
@@ -44,3 +45,7 @@ def test_retry_exhaustion_writes_dlq(tmp_path: Path, monkeypatch) -> None:
     assert dlq_path.exists()
     lines = dlq_path.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["attempt_count"] == 2
+    assert record["error_class"] == "retry_exhausted"
+    assert record["document_key"]

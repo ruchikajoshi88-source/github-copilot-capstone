@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ class DlqRecord:
     source_path: str
     error_class: str
     error_message: str
+    error_code: str | None = None
     document_key: str | None = None
     event_id: str | None = None
     attempt_count: int = 0
@@ -32,6 +34,7 @@ class JsonlDlqStore:
             "trigger_type": record.trigger_type,
             "source_path": record.source_path,
             "error_class": record.error_class,
+            "error_code": record.error_code,
             "error_message": record.error_message,
             "document_key": record.document_key,
             "event_id": record.event_id,
@@ -41,3 +44,5 @@ class JsonlDlqStore:
         with self._path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=True))
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f2eb">
+  <title>Alpine Escape | Tour Booking &amp; Summary</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c302c;
+      --muted: #62726d;
+      --line: #e2e8e2;
+      --paper: #fffefa;
+      --green: #245d4d;
+      --green-dark: #19493c;
+      --sand: #f5f2eb;
+      --mint: #e7f0e9;
+      --coral: #b44836;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--sand);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    .page { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 38px 0 24px; }
+    .masthead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 46px; }
+    .brand { display: flex; gap: 11px; align-items: center; color: var(--green-dark); font-weight: 750; letter-spacing: .02em; }
+    .brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 12px; background: var(--green); color: white; }
+    .edition { color: var(--muted); font-size: .88rem; }
+    .eyebrow { color: var(--green); font-size: .75rem; font-weight: 750; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { max-width: 680px; margin: 9px 0 12px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 500; letter-spacing: -.045em; line-height: 1.02; }
+    .intro { max-width: 610px; margin: 0; color: var(--muted); font-size: 1.05rem; line-height: 1.65; }
+    .content { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(340px, .8fr); gap: 26px; align-items: start; margin-top: 32px; }
+    .card { border: 1px solid var(--line); border-radius: 20px; background: var(--paper); box-shadow: 0 10px 32px rgb(34 54 44 / 5%); }
+    .booking { padding: 27px; }
+    .card-title { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 1.55rem; font-weight: 500; letter-spacing: -.02em; }
+    .card-subtitle { margin: 7px 0 23px; color: var(--muted); font-size: .92rem; line-height: 1.55; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 14px; }
+    label { display: grid; gap: 7px; color: #43564f; font-size: .82rem; font-weight: 650; }
+    input, select { width: 100%; height: 46px; padding: 0 12px; border: 1px solid #dce4dd; border-radius: 10px; outline: none; background: white; color: var(--ink); font: inherit; }
+    input:focus, select:focus { border-color: #6a9884; box-shadow: 0 0 0 3px rgb(75 126 100 / 13%); }
+    .full { grid-column: 1 / -1; }
+    .submit { width: 100%; margin-top: 22px; padding: 14px 18px; border: 0; border-radius: 11px; background: var(--green); color: white; cursor: pointer; font: inherit; font-weight: 700; }
+    .submit:hover { background: var(--green-dark); }
+    .static-note { margin: 13px 0 0; color: var(--muted); font-size: .77rem; text-align: center; }
+    .panels { display: grid; gap: 16px; }
+    .panel { padding: 21px; }
+    .panel-heading { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+    .panel .card-title { font-size: 1.25rem; }
+    .tag { padding: 6px 9px; border-radius: 99px; background: var(--mint); color: var(--green-dark); font-size: .7rem; font-weight: 700; white-space: nowrap; }
+    .summary-lead { margin: 14px 0; color: var(--muted); font-size: .9rem; line-height: 1.5; }
+    .summary-row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); font-size: .85rem; }
+    .summary-row span { color: var(--muted); }
+    .summary-row strong { text-align: right; font-weight: 650; }
+    .price { color: var(--green-dark); font-size: 1.15rem; }
+    .download-copy { margin: 12px 0 16px; color: var(--muted); font-size: .89rem; line-height: 1.55; }
+    .download { width: 100%; padding: 12px 15px; border: 1px solid var(--green); border-radius: 10px; background: var(--green); color: white; cursor: pointer; font: inherit; font-weight: 700; }
+    .download:hover { background: var(--green-dark); }
+    .helper { margin: 10px 0 0; color: var(--muted); font-size: .75rem; }
+    .error { margin: 8px 0 0; color: var(--coral); font-size: .82rem; }
+    .support-copy { margin: 10px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.55; }
+    footer { padding: 34px 0 8px; color: var(--muted); font-size: .77rem; text-align: center; }
+
+    @media (max-width: 760px) {
+      .page { width: min(560px, calc(100% - 32px)); padding-top: 24px; }
+      .masthead { margin-bottom: 34px; }
+      .edition { display: none; }
+      .content { grid-template-columns: 1fr; gap: 17px; margin-top: 25px; }
+      .booking { padding: 21px; }
+      .panel { padding: 19px; }
+    }
+    @media (max-width: 420px) {
+      .fields { grid-template-columns: 1fr; }
+      .full { grid-column: auto; }
+      h1 { font-size: 2.6rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">A</span><span>ALPINE ESCAPE</span></div>
+      <span class="edition">SMALL-GROUP JOURNEYS · EST. 2012</span>
+    </header>
+    <section aria-labelledby="page-title">
+      <p class="eyebrow">The Dolomites · Italy</p>
+      <h1 id="page-title">A little closer to the wild.</h1>
+      <p class="intro">Trade the everyday for alpine air, quiet trails, and long lunches in the mountains. Your next great story starts here.</p>
+    </section>
+
+    <div class="content">
+      <section class="card booking" aria-labelledby="booking-title">
+        <p class="eyebrow">Your journey</p>
+        <h2 class="card-title" id="booking-title">Plan your escape</h2>
+        <p class="card-subtitle">Tell us what your ideal mountain week looks like.</p>
+        <form data-testid="booking-form">
+          <div class="fields">
+            <label>First name<input name="first-name" autocomplete="given-name" placeholder="Your name"></label>
+            <label>Email address<input name="email" type="email" autocomplete="email" placeholder="you@example.com"></label>
+            <label>Departure date<input name="date" type="date"></label>
+            <label>Guests<select name="guests"><option>1 traveler</option><option>2 travelers</option><option>3 travelers</option><option>4 travelers</option></select></label>
+            <label class="full">Travel style<select name="style"><option>Scenic hikes &amp; slow mornings</option><option>Big days on the trail</option><option>Food, villages &amp; culture</option></select></label>
+          </div>
+          <button class="submit" type="submit" data-testid="book-now-btn">Book Now</button>
+          <p class="static-note">A presentation demo — no reservation is submitted.</p>
+        </form>
+      </section>
+
+      <div class="panels">
+        <section class="card panel" data-testid="tour-summary-card" aria-labelledby="summary-title">
+          <div class="panel-heading"><h2 class="card-title" id="summary-title">Tour Summary</h2><span class="tag">7 days · 6 nights</span></div>
+          <p class="summary-lead">A week of limestone peaks, lakeside paths, and welcoming mountain inns.</p>
+          <div class="summary-row"><span>Destination</span><strong>Dolomites, Italy</strong></div>
+          <div class="summary-row"><span>Group size</span><strong>Up to 8 travelers</strong></div>
+          <div class="summary-row"><span>Next departure</span><strong>September 14, 2026</strong></div>
+          <div class="summary-row"><span>Starting from</span><strong class="price">€1,890 <small>/ person</small></strong></div>
+        </section>
+
+        <section class="card panel" data-testid="brochure-card" aria-labelledby="brochure-title">
+          <div class="panel-heading"><h2 class="card-title" id="brochure-title">Download Brochure</h2><span aria-hidden="true">↗</span></div>
+          <p class="download-copy">Take the itinerary, packing notes, and trip details with you.</p>
+          <button class="download" type="button" data-testid="download-brochure-btn">Download Brochure</button>
+          <p class="helper">(Demo file generated in-browser)</p>
+          <p class="error" data-testid="brochure-error" role="alert" hidden></p>
+        </section>
+
+        <section class="card panel" data-testid="support-card" aria-labelledby="support-title">
+          <div class="panel-heading"><h2 class="card-title" id="support-title">Support</h2><span class="tag">Here to help</span></div>
+          <p class="support-copy">Our trip specialists can help you find the right pace and answer questions about the route, stays, and what to bring.</p>
+          <div class="summary-row"><span>Guest care</span><strong>Mon–Fri · 9am–5pm CET</strong></div>
+        </section>
+      </div>
+    </div>
+    <footer>Thoughtfully planned. Happily wandered. &nbsp;·&nbsp; Alpine Escape © 2026</footer>
+  </main>
+  <script>
+    const bookingForm = document.querySelector('[data-testid="booking-form"]');
+    bookingForm.addEventListener('submit', (event) => event.preventDefault());
+
+    const brochureButton = document.querySelector('[data-testid="download-brochure-btn"]');
+    const brochureError = document.querySelector('[data-testid="brochure-error"]');
+    brochureButton.addEventListener('click', () => {
+      brochureError.textContent = '';
+      brochureError.hidden = true;
+      try {
+        if (new URLSearchParams(window.location.search).get('simulate_error') === 'true') {
+          throw new Error('simulated');
+        }
+        const brochure = new Blob(
+          ['%PDF-1.4\n% Alpine Escape demo brochure\n%%EOF\n'],
+          { type: 'application/pdf' }
+        );
+        const objectUrl = URL.createObjectURL(brochure);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = 'tour-brochure.pdf';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
+      } catch (_error) {
+        brochureError.textContent = 'Unable to generate brochure (demo)';
+        brochureError.hidden = false;
+      }
+    });
+  </script>
+</body>
+</html>

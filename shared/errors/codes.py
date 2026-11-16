@@ -12,3 +12,4 @@ class ErrorCode(str, Enum):
     EVENT_VALIDATION_ERROR = "event_validation_error"
     CONFIG_ERROR = "config_error"
     UNEXPECTED_ERROR = "unexpected_error"
+    PERSISTENCE_ERROR = "persistence_error"

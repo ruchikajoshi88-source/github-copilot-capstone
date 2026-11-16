@@ -17,6 +17,7 @@ class RetryPolicy:
 class Settings:
     repository_id: str
     source_root: str
+    database_path: str
     include_patterns: tuple[str, ...]
     exclude_patterns: tuple[str, ...]
     retry_policy: RetryPolicy
@@ -55,6 +56,7 @@ def load_settings_from_env() -> Settings:
     return Settings(
         repository_id=os.environ["SYNC_REPOSITORY_ID"],
         source_root=os.environ["SYNC_SOURCE_ROOT"],
+        database_path=os.getenv("SYNC_DATABASE_PATH", ".sync/state.sqlite3"),
         include_patterns=include_patterns,
         exclude_patterns=exclude_patterns,
         retry_policy=retry_policy,

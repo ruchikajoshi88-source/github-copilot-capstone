@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-
 @dataclass
 class InMemoryIdempotencyStore:
     """Tracks last successful checksum per document key."""
@@ -30,3 +29,11 @@ class InMemoryEventLedger:
     def mark_processed(self, event_id: str | None) -> None:
         if event_id:
             self._processed.add(event_id)
+
+    def claim_event(self, event_id: str) -> bool:
+        if self.seen(event_id):
+            return False
+        return True
+
+    def mark_retryable(self, event_id: str | None) -> None:
+        return None

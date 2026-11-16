@@ -14,6 +14,7 @@ class SourceFile:
     absolute_path: Path
     relative_path: str
     size_bytes: int
+    discovery_error: str | None = None
 
 
 def _matches_any(path: str, patterns: tuple[str, ...]) -> bool:
@@ -24,6 +25,16 @@ def _matches_any(path: str, patterns: tuple[str, ...]) -> bool:
         if pattern.startswith("**/") and fnmatch.fnmatch(path, pattern[3:]):
             return True
     return False
+
+
+def is_markdown_path_in_scope(
+    path: str,
+    include_patterns: tuple[str, ...],
+    exclude_patterns: tuple[str, ...],
+) -> bool:
+    return (not include_patterns or _matches_any(path, include_patterns)) and not (
+        exclude_patterns and _matches_any(path, exclude_patterns)
+    )
 
 
 def discover_markdown_files(
@@ -40,20 +51,21 @@ def discover_markdown_files(
     for candidate in root.rglob("*.md"):
         relative = candidate.relative_to(root).as_posix()
 
-        if include_patterns and not _matches_any(relative, include_patterns):
-            continue
-        if exclude_patterns and _matches_any(relative, exclude_patterns):
+        if not is_markdown_path_in_scope(relative, include_patterns, exclude_patterns):
             continue
 
         try:
+            candidate.resolve().relative_to(root.resolve())
             size_bytes = candidate.stat().st_size
+            discovery_error = None
+        except ValueError:
+            size_bytes = 0
+            discovery_error = "Source path resolves outside source root"
         except OSError as exc:
-            raise SourceAccessError(
-                "Unable to stat source file",
-                {"source_path": relative, "cause": str(exc)},
-            ) from exc
+            size_bytes = 0
+            discovery_error = f"Unable to stat source file: {exc}"
 
-        results.append(SourceFile(candidate, relative, size_bytes))
+        results.append(SourceFile(candidate, relative, size_bytes, discovery_error))
 
     return sorted(results, key=lambda item: item.relative_path)
 
